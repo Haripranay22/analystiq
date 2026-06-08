@@ -71,6 +71,10 @@ Tables we work with (mirrors real analyst work at State Street):
 - [Phase 2] Results stored as JSON string in state (handles Decimal/datetime via default=str)
 - [Phase 2] Module-level LLM and engine instances — avoid re-initializing on every node call
 - [Phase 2] Explainer receives only first 10 rows to keep token usage low
+- [Phase 3] Two endpoints: GET /health (liveness + DB check), POST /query (runs agent)
+- [Phase 3] /health returns db status string — "ok" or the exception message, not a boolean
+- [Phase 3] Agent errors raise HTTP 500 with detail; SQL errors surface in response.error (not 500)
+- [Phase 3] Start with: uvicorn api.main:app --reload (run from project root)
 - [Phase 4] Chart auto-detection: date+numeric=line, label+numeric=bar, single value=metric, else table only
 - [Phase 4] Bar charts capped at 20 rows, sorted ascending so top values read at the top
 - [Phase 4] API calls go to http://127.0.0.1:8000 — both uvicorn and streamlit must be running
