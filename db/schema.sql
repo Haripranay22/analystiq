@@ -18,6 +18,7 @@ CREATE TABLE customers (
     age             INT,
     segment         VARCHAR(30)  CHECK (segment IN ('retail', 'premium', 'business')),
     risk_score      NUMERIC(4,2) CHECK (risk_score BETWEEN 0 AND 10),
+    credit_score    INT         CHECK (credit_score BETWEEN 300 AND 850),  -- FICO-style, 300–850
     created_at      TIMESTAMP DEFAULT NOW()
 );
 

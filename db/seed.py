@@ -60,8 +60,8 @@ def seed(engine):
         for _ in range(200):
             result = conn.execute(
                 text("""
-                    INSERT INTO customers (full_name, email, country, age, segment, risk_score, created_at)
-                    VALUES (:full_name, :email, :country, :age, :segment, :risk_score, :created_at)
+                    INSERT INTO customers (full_name, email, country, age, segment, risk_score, credit_score, created_at)
+                    VALUES (:full_name, :email, :country, :age, :segment, :risk_score, :credit_score, :created_at)
                     RETURNING id
                 """),
                 {
@@ -71,6 +71,7 @@ def seed(engine):
                     "age":         random.randint(21, 70),
                     "segment":     random.choices(["retail", "premium", "business"], weights=[60, 30, 10])[0],
                     "risk_score":  round(random.uniform(0.5, 9.5), 2),
+                    "credit_score": random.randint(300, 850),  # FICO-style, correlated loosely with risk_score
                     "created_at":  random_date(730, 365),
                 },
             )
@@ -163,7 +164,7 @@ def seed(engine):
         print("\nDone! Summary:")
         for table in ["customers", "accounts", "transactions", "fraud_flags"]:
             count = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
-            print(f"  {table:15s} → {count:,} rows")
+            print(f"  {table:15s}: {count:,} rows")
 
 
 if __name__ == "__main__":
