@@ -13,7 +13,8 @@ Not an AI engineer. An analyst who ships AI-powered data tools.
 **PHASE 0 COMPLETE — Project Foundation**
 **PHASE 1 COMPLETE — Database Layer**
 **PHASE 2 COMPLETE — LangGraph Agent Core**
-**PHASE 3 NEXT — FastAPI Backend**
+**PHASE 3 COMPLETE — FastAPI Backend**
+**PHASE 4 NEXT — Streamlit UI**
 
 ## Stack & Why
 | Layer       | Tool              | Why                                              |
@@ -69,6 +70,10 @@ Tables we work with (mirrors real analyst work at State Street):
 - [Phase 2] Results stored as JSON string in state (handles Decimal/datetime via default=str)
 - [Phase 2] Module-level LLM and engine instances — avoid re-initializing on every node call
 - [Phase 2] Explainer receives only first 10 rows to keep token usage low
+- [Phase 3] Two endpoints: GET /health (liveness + DB check), POST /query (runs agent)
+- [Phase 3] /health returns db status string — "ok" or the exception message, not a boolean
+- [Phase 3] Agent errors raise HTTP 500 with detail; SQL errors surface in response.error (not 500)
+- [Phase 3] Start with: uvicorn api.main:app --reload (run from project root)
 
 ## What NOT to do
 - Do NOT hardcode API keys anywhere
