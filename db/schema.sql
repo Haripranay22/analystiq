@@ -58,6 +58,32 @@ CREATE TABLE fraud_flags (
     flagged_at      TIMESTAMP DEFAULT NOW()
 );
 
+-- Chat history: persists conversation threads across sessions
+-- role is 'user' or 'assistant'
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id          SERIAL PRIMARY KEY,
+    title       VARCHAR(200) NOT NULL DEFAULT 'New chat',
+    created_at  TIMESTAMP DEFAULT NOW(),
+    updated_at  TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id              SERIAL PRIMARY KEY,
+    thread_id       INT REFERENCES chat_threads(id) ON DELETE CASCADE,
+    role            VARCHAR(20) CHECK (role IN ('user', 'assistant')) NOT NULL,
+    question        TEXT,
+    sql             TEXT,
+    result_json     TEXT,
+    chart_spec      JSONB,
+    explanation     TEXT,
+    elapsed_ms      INT,
+    error           TEXT,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_chat_threads_updated ON chat_threads(updated_at DESC);
+
 -- Indexes for common analyst query patterns
 CREATE INDEX idx_transactions_account   ON transactions(account_id);
 CREATE INDEX idx_transactions_created   ON transactions(created_at);
