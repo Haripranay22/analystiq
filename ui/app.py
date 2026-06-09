@@ -22,9 +22,12 @@ try:
 except ImportError:
     pass
 
-for _key in ["OPENAI_API_KEY", "DATABASE_URL", "OPENAI_MODEL", "API_URL"]:
-    if _key not in os.environ and hasattr(st, "secrets") and _key in st.secrets:
-        os.environ[_key] = st.secrets[_key]
+try:
+    for _key in ["OPENAI_API_KEY", "DATABASE_URL", "OPENAI_MODEL", "API_URL"]:
+        if _key not in os.environ and _key in st.secrets:
+            os.environ[_key] = st.secrets[_key]
+except FileNotFoundError:
+    pass  # No secrets.toml locally — that's fine, .env handles it
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
