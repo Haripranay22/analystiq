@@ -15,6 +15,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+# ── Page config MUST be the first Streamlit call — before st.secrets ──────────
+st.set_page_config(
+    page_title="AnalystIQ",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 # ── Env: local (.env) and Streamlit Cloud (st.secrets) ───────────────────────
 try:
     from dotenv import load_dotenv
@@ -32,15 +40,6 @@ except FileNotFoundError:
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ui import api_client, db  # noqa: E402
-
-# ── Page config ───────────────────────────────────────────────────────────────
-
-st.set_page_config(
-    page_title="AnalystIQ",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 
