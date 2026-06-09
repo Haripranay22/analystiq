@@ -204,10 +204,10 @@ def _render_answer_card(msg: dict, card_key: str):
     with tab_sql:
         st.code(sql, language="sql")
 
-        with st.expander("Edit & re-run", expanded=False):
+        if st.toggle("Edit & re-run", key=f"toggle_{card_key}"):
             edited = st.text_area("Edit SQL below:", value=sql,
                                   height=120, key=f"edit_{card_key}")
-            if st.button("Run edited SQL", key=f"run_{card_key}"):
+            if st.button("▶ Run edited SQL", key=f"run_{card_key}"):
                 with st.spinner("Running…"):
                     try:
                         resp = api_client.execute_sql(edited)
