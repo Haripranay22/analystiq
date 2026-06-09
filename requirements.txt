@@ -24,3 +24,4 @@ plotly==5.22.0
 python-dotenv==1.0.1
 pandas==2.2.3
 faker==25.9.2
+openpyxl==3.1.5
