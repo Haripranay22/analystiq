@@ -18,7 +18,7 @@ import streamlit as st
 # ── Page config MUST be the first Streamlit call — before st.secrets ──────────
 st.set_page_config(
     page_title="AnalystIQ",
-    page_icon="📊",
+    page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -31,11 +31,12 @@ except ImportError:
     pass
 
 try:
+    _secrets = dict(st.secrets)
     for _key in ["OPENAI_API_KEY", "DATABASE_URL", "OPENAI_MODEL", "API_URL"]:
-        if _key not in os.environ and _key in st.secrets:
-            os.environ[_key] = st.secrets[_key]
-except FileNotFoundError:
-    pass  # No secrets.toml locally — that's fine, .env handles it
+        if _key not in os.environ and _key in _secrets:
+            os.environ[_key] = _secrets[_key]
+except Exception:
+    pass  # No secrets.toml locally — .env handles it
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -243,7 +244,7 @@ def _render_answer_card(msg: dict, card_key: str):
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown('<p class="brand">📊 AnalystIQ</p>', unsafe_allow_html=True)
+    st.markdown('<p class="brand">🔍 AnalystIQ</p>', unsafe_allow_html=True)
     st.markdown('<p class="brand-sub">AI Copilot for Data Analysts</p>', unsafe_allow_html=True)
 
     # New chat button
