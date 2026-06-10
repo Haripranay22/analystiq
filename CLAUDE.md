@@ -15,7 +15,8 @@ Not an AI engineer. An analyst who ships AI-powered data tools.
 **PHASE 2 COMPLETE — LangGraph Agent Core**
 **PHASE 3 COMPLETE — FastAPI Backend**
 **PHASE 4 COMPLETE — Streamlit UI**
-**PHASE 5 NEXT — Polish & Demo**
+**PHASE 5 COMPLETE — Production UI + Hardening**
+**PHASE 6 NEXT — README + Deployment**
 
 ## Stack & Why
 | Layer       | Tool              | Why                                              |
@@ -79,6 +80,14 @@ Tables we work with (mirrors real analyst work at State Street):
 - [Phase 4] Bar charts capped at 20 rows, sorted ascending so top values read at the top
 - [Phase 4] API calls go to http://127.0.0.1:8000 — both uvicorn and streamlit must be running
 - [Phase 4] Start UI with: streamlit run ui/app.py
+- [Phase 5] All API calls go through ui/api_client.py — never import agent directly in UI
+- [Phase 5] chat_messages.query_sql (not 'sql' — reserved word in PostgreSQL)
+- [Phase 5] result_json capped at 500 rows before DB storage (db.py _cap_result_json)
+- [Phase 5] /execute uses _get_ro_engine() — set DATABASE_URL_RO for proper read-only isolation
+- [Phase 5] /schema response cached with lru_cache(maxsize=1) server-side + st.cache_data(ttl=300) client-side
+- [Phase 5] chat_threads/chat_messages filtered from schema browser (internal tables)
+- [Phase 5] delete_empty_threads() called on every New Chat click to prevent sidebar bloat
+- [Phase 5] Numeric dtype coercion in _auto_chart — JSON columns come back as object dtype
 
 ## What NOT to do
 - Do NOT hardcode API keys anywhere

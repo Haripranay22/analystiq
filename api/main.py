@@ -12,6 +12,7 @@ Endpoints:
 import json
 import os
 import time
+from functools import lru_cache
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -42,7 +43,8 @@ app = FastAPI(
 )
 
 # One engine shared across requests — SQLAlchemy pools connections internally
-_engine = None
+_engine    = None
+_ro_engine = None
 
 
 def _get_engine():
@@ -53,6 +55,19 @@ def _get_engine():
             raise ValueError("DATABASE_URL not set")
         _engine = create_engine(db_url, pool_pre_ping=True)
     return _engine
+
+
+def _get_ro_engine():
+    """
+    Read-only engine for the /execute endpoint.
+    Falls back to the main engine if DATABASE_URL_RO is not set
+    (keyword guard still applies as a second layer).
+    """
+    global _ro_engine
+    if _ro_engine is None:
+        ro_url = os.getenv("DATABASE_URL_RO") or os.getenv("DATABASE_URL")
+        _ro_engine = create_engine(ro_url, pool_pre_ping=True)
+    return _ro_engine
 
 
 def _check_db() -> str:
@@ -107,12 +122,9 @@ def query(request: QuestionRequest):
 
 # ── /schema ───────────────────────────────────────────────────────────────────
 
-@app.get("/schema", response_model=SchemaResponse, tags=["system"])
-def schema():
-    """
-    Returns the live database schema — table names and their columns with
-    types, nullability, and PK flags. Used by the sidebar schema browser.
-    """
+@lru_cache(maxsize=1)
+def _build_schema() -> SchemaResponse:
+    """Cached schema build — result is reused across requests until restart."""
     insp = inspect(_get_engine())
     tables = []
     for table_name in sorted(insp.get_table_names()):
@@ -128,6 +140,15 @@ def schema():
         ]
         tables.append(SchemaTable(name=table_name, columns=columns))
     return SchemaResponse(tables=tables)
+
+
+@app.get("/schema", response_model=SchemaResponse, tags=["system"])
+def schema():
+    """
+    Returns the live DB schema (tables + columns). Cached in memory after
+    first call — restarts the server to pick up schema changes.
+    """
+    return _build_schema()
 
 
 # ── /execute ──────────────────────────────────────────────────────────────────
@@ -165,7 +186,7 @@ def execute(request: ExecuteRequest):
         )
     t0 = time.monotonic()
     try:
-        with _get_engine().connect() as conn:
+        with _get_ro_engine().connect() as conn:
             result_proxy = conn.execute(text(request.sql))
             keys = list(result_proxy.keys())
             rows = result_proxy.fetchall()

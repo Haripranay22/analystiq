@@ -105,6 +105,12 @@ PLOTLY_LAYOUT = dict(
 )
 
 
+@st.cache_data(ttl=300)
+def _get_schema_cached():
+    """Cache schema for 5 min — avoids hitting the API on every sidebar render."""
+    return api_client.get_schema()
+
+
 def _df_from_json(result_json: str) -> pd.DataFrame:
     try:
         return pd.DataFrame(json.loads(result_json or "[]"))
@@ -348,8 +354,12 @@ with st.sidebar:
     # ── Schema browser ────────────────────────────────────────────────────────
     with st.expander("🗂 Schema browser", expanded=False):
         try:
-            schema_data = api_client.get_schema()
+            schema_data = _get_schema_cached()
+            # Hide internal chat tables — analysts don't need to see them
+            _INTERNAL = {"chat_threads", "chat_messages"}
             for tbl in schema_data.get("tables", []):
+                if tbl["name"] in _INTERNAL:
+                    continue
                 st.markdown(f"**{tbl['name']}**")
                 for col in tbl["columns"]:
                     pk_badge = ' <span class="schema-pk">PK</span>' if col.get("is_pk") else ""
@@ -369,6 +379,33 @@ with st.sidebar:
     Built by <b>Haripranay Peddagolla</b>
     </div>""", unsafe_allow_html=True)
 
+
+# ── Live metrics row ──────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=300)
+def _load_db_metrics():
+    try:
+        from sqlalchemy import create_engine, text
+        engine = create_engine(os.getenv("DATABASE_URL", ""), pool_pre_ping=True)
+        with engine.connect() as conn:
+            customers  = conn.execute(text("SELECT COUNT(*) FROM customers")).scalar()
+            txns       = conn.execute(text("SELECT COUNT(*) FROM transactions")).scalar()
+            fraud_rate = conn.execute(text(
+                "SELECT ROUND(100.0 * SUM(CASE WHEN is_fraud THEN 1 ELSE 0 END) / COUNT(*), 1) FROM transactions"
+            )).scalar()
+            avg_credit = conn.execute(text("SELECT ROUND(AVG(credit_score)) FROM customers")).scalar()
+        return {"customers": customers, "txns": txns, "fraud_rate": fraud_rate, "avg_credit": avg_credit}
+    except Exception:
+        return None
+
+_metrics = _load_db_metrics()
+if _metrics:
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Customers",  f"{_metrics['customers']:,}")
+    m2.metric("Transactions",     f"{_metrics['txns']:,}")
+    m3.metric("Fraud Rate",       f"{_metrics['fraud_rate']}%")
+    m4.metric("Avg Credit Score", f"{_metrics['avg_credit']}")
+    st.divider()
 
 # ── Main area ─────────────────────────────────────────────────────────────────
 
