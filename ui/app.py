@@ -115,6 +115,16 @@ def _df_from_json(result_json: str) -> pd.DataFrame:
 def _auto_chart(df: pd.DataFrame, override: str = "Auto"):
     if df.empty or len(df.columns) < 2:
         return None
+
+    # JSON deserialisation often gives numeric columns object dtype.
+    # Attempt coercion so type detection works correctly.
+    df = df.copy()
+    for col in df.columns:
+        if df[col].dtype == object:
+            coerced = pd.to_numeric(df[col], errors="coerce")
+            if coerced.notna().sum() > len(df) * 0.8:   # >80% converted → treat as numeric
+                df[col] = coerced
+
     cols         = list(df.columns)
     numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
     date_cols    = [c for c in cols if any(k in c.lower() for k in ["month","date","week","year","period"])]
