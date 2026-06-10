@@ -250,7 +250,10 @@ def _render_answer_card(msg: dict, card_key: str):
 
     # ── Explanation tab ───────────────────────────────────────────────────────
     with tab_expl:
-        st.markdown(expl) if expl else st.info("No explanation available.")
+        if expl:
+            st.markdown(expl)
+        else:
+            st.info("No explanation available.")
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
