@@ -43,7 +43,7 @@ async def capture():
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(3)
         await page.screenshot(path=str(ASSETS / "01_welcome.png"), full_page=False)
-        print("✓ 01_welcome.png")
+        print("OK 01_welcome.png")
 
         # ── 2. Ask a question and capture results ──────────────────────────────
         chat_input = page.locator("textarea[placeholder*='question']")
@@ -58,7 +58,7 @@ async def capture():
             await asyncio.sleep(10)
 
         await page.screenshot(path=str(ASSETS / "02_results.png"), full_page=False)
-        print("✓ 02_results.png")
+        print("OK 02_results.png")
 
         # ── 3. Chart tab ───────────────────────────────────────────────────────
         chart_tab = page.locator("button[role='tab']").filter(has_text="Chart")
@@ -66,7 +66,7 @@ async def capture():
             await chart_tab.first.click()
             await asyncio.sleep(2)
         await page.screenshot(path=str(ASSETS / "03_chart.png"), full_page=False)
-        print("✓ 03_chart.png")
+        print("OK 03_chart.png")
 
         # ── 4. SQL tab ─────────────────────────────────────────────────────────
         sql_tab = page.locator("button[role='tab']").filter(has_text="SQL")
@@ -74,7 +74,7 @@ async def capture():
             await sql_tab.first.click()
             await asyncio.sleep(1)
         await page.screenshot(path=str(ASSETS / "04_sql.png"), full_page=False)
-        print("✓ 04_sql.png")
+        print("OK 04_sql.png")
 
         # ── 5. Explanation tab ─────────────────────────────────────────────────
         expl_tab = page.locator("button[role='tab']").filter(has_text="Explanation")
@@ -82,7 +82,7 @@ async def capture():
             await expl_tab.first.click()
             await asyncio.sleep(1)
         await page.screenshot(path=str(ASSETS / "05_explanation.png"), full_page=False)
-        print("✓ 05_explanation.png")
+        print("OK 05_explanation.png")
 
         await browser.close()
         print(f"\nAll screenshots saved to {ASSETS}/")
