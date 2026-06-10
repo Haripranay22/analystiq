@@ -3,15 +3,20 @@ ui/db.py — Chat persistence layer.
 
 Reads/writes chat_threads and chat_messages directly via SQLAlchemy.
 The UI calls these functions; nothing else in the UI touches the DB directly.
+
+Column notes:
+  - query_sql (not 'sql' — sql is a reserved word in PostgreSQL)
+  - result_json capped at 500 rows before storage to prevent DB bloat
 """
 
+import json
 import os
-from datetime import datetime
-from typing import Any
 
 from sqlalchemy import create_engine, text
 
-# Reuse the same DATABASE_URL the agent uses
+MAX_STORED_ROWS = 500   # cap result_json before writing to DB
+MAX_THREADS_SHOWN = 10  # sidebar pagination cap
+
 _engine = None
 
 
@@ -23,15 +28,32 @@ def _get_engine():
     return _engine
 
 
+def _cap_result_json(result_json: str) -> str:
+    """Truncate result JSON to MAX_STORED_ROWS rows before storing."""
+    try:
+        rows = json.loads(result_json or "[]")
+        if len(rows) > MAX_STORED_ROWS:
+            rows = rows[:MAX_STORED_ROWS]
+        return json.dumps(rows)
+    except Exception:
+        return result_json
+
+
 # ── Threads ───────────────────────────────────────────────────────────────────
 
-def list_threads() -> list[dict]:
-    """Return all threads ordered by most recently updated."""
+def list_threads(limit: int = MAX_THREADS_SHOWN) -> list[dict]:
+    """Return most recently updated threads, capped at limit."""
     with _get_engine().connect() as conn:
         rows = conn.execute(text(
-            "SELECT id, title, updated_at FROM chat_threads ORDER BY updated_at DESC"
-        )).fetchall()
+            "SELECT id, title, updated_at FROM chat_threads "
+            "ORDER BY updated_at DESC LIMIT :limit"
+        ), {"limit": limit}).fetchall()
     return [{"id": r[0], "title": r[1], "updated_at": r[2]} for r in rows]
+
+
+def count_threads() -> int:
+    with _get_engine().connect() as conn:
+        return conn.execute(text("SELECT COUNT(*) FROM chat_threads")).scalar() or 0
 
 
 def create_thread(title: str = "New chat") -> int:
@@ -57,8 +79,18 @@ def delete_thread(thread_id: int) -> None:
         conn.execute(text("DELETE FROM chat_threads WHERE id=:id"), {"id": thread_id})
 
 
+def delete_empty_threads() -> int:
+    """Delete threads that have no messages. Returns count deleted."""
+    with _get_engine().begin() as conn:
+        result = conn.execute(text("""
+            DELETE FROM chat_threads
+            WHERE id NOT IN (SELECT DISTINCT thread_id FROM chat_messages)
+            RETURNING id
+        """))
+        return len(result.fetchall())
+
+
 def touch_thread(thread_id: int) -> None:
-    """Update updated_at so thread floats to the top of the list."""
     with _get_engine().begin() as conn:
         conn.execute(
             text("UPDATE chat_threads SET updated_at=NOW() WHERE id=:id"),
@@ -69,10 +101,10 @@ def touch_thread(thread_id: int) -> None:
 # ── Messages ──────────────────────────────────────────────────────────────────
 
 def get_messages(thread_id: int) -> list[dict]:
-    """Return all messages in a thread in order."""
+    """Return all messages in a thread in chronological order."""
     with _get_engine().connect() as conn:
         rows = conn.execute(text("""
-            SELECT id, role, question, sql, result_json, explanation,
+            SELECT id, role, question, query_sql, result_json, explanation,
                    elapsed_ms, error, created_at
             FROM chat_messages
             WHERE thread_id = :thread_id
@@ -89,7 +121,6 @@ def get_messages(thread_id: int) -> list[dict]:
 
 
 def save_user_message(thread_id: int, question: str) -> int:
-    """Persist a user turn and return the message id."""
     with _get_engine().begin() as conn:
         result = conn.execute(text("""
             INSERT INTO chat_messages (thread_id, role, question)
@@ -108,18 +139,20 @@ def save_assistant_message(
     elapsed_ms: int,
     error: str,
 ) -> int:
-    """Persist an assistant turn and return the message id."""
+    """Persist an assistant turn. Caps result_json at 500 rows before storing."""
+    capped_json = _cap_result_json(result_json)
     with _get_engine().begin() as conn:
         result = conn.execute(text("""
             INSERT INTO chat_messages
-                (thread_id, role, question, sql, result_json, explanation, elapsed_ms, error)
+                (thread_id, role, question, query_sql, result_json,
+                 explanation, elapsed_ms, error)
             VALUES
-                (:thread_id, 'assistant', :question, :sql, :result_json,
+                (:thread_id, 'assistant', :question, :query_sql, :result_json,
                  :explanation, :elapsed_ms, :error)
             RETURNING id
         """), {
-            "thread_id": thread_id, "question": question, "sql": sql,
-            "result_json": result_json, "explanation": explanation,
+            "thread_id": thread_id, "question": question, "query_sql": sql,
+            "result_json": capped_json, "explanation": explanation,
             "elapsed_ms": elapsed_ms, "error": error,
         })
         mid = result.fetchone()[0]

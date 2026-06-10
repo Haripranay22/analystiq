@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     thread_id       INT REFERENCES chat_threads(id) ON DELETE CASCADE,
     role            VARCHAR(20) CHECK (role IN ('user', 'assistant')) NOT NULL,
     question        TEXT,
-    sql             TEXT,
+    query_sql       TEXT,
     result_json     TEXT,
     chart_spec      JSONB,
     explanation     TEXT,

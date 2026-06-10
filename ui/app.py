@@ -15,7 +15,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# ── Page config MUST be the first Streamlit call — before st.secrets ──────────
+# ── Page config MUST be the first Streamlit call ──────────────────────────────
 st.set_page_config(
     page_title="AnalystIQ",
     page_icon="📊",
@@ -42,21 +42,43 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ui import api_client, db  # noqa: E402
 
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+CHART_TYPES   = ["Auto", "Bar", "Line", "Area", "Pie", "Scatter"]
+MAX_DISPLAY_ROWS = 500   # rows shown in UI (DB already caps stored rows)
+
+# Friendly messages for known API error patterns
+_FRIENDLY_ERRORS = {
+    "api key":          "OpenAI API key is invalid or expired. Check your OPENAI_API_KEY.",
+    "rate limit":       "OpenAI rate limit hit. Wait a moment and try again.",
+    "insufficient_quota": "OpenAI quota exceeded. Check your billing at platform.openai.com.",
+    "connection":       "Cannot reach the API server. Make sure uvicorn is running.",
+    "timeout":          "The query timed out. Try a simpler question.",
+}
+
+def _friendly_error(raw: str) -> str:
+    low = raw.lower()
+    for key, msg in _FRIENDLY_ERRORS.items():
+        if key in low:
+            return msg
+    return raw  # unknown error — show as-is but without traceback
+
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 
 st.markdown("""
 <style>
 #MainMenu, footer, header { visibility: hidden; }
 
-.brand { font-size:22px; font-weight:700; color:#4F8EF7; margin:0 0 2px 0; }
+.brand     { font-size:22px; font-weight:700; color:#4F8EF7; margin:0 0 2px 0; }
 .brand-sub { font-size:12px; color:#8B8FA8; margin:0 0 16px 0; }
 
 .schema-type { font-size:11px; color:#8B8FA8; font-family:monospace; }
 .schema-pk   { font-size:10px; color:#4F8EF7; font-weight:600; }
 
-.meta-strip  { font-size:12px; color:#8B8FA8; margin: 4px 0 8px 0; }
-.meta-ok     { color:#4ADE80; }
-.meta-err    { color:#F87171; }
+.meta-strip { font-size:12px; color:#8B8FA8; margin: 4px 0 8px 0; }
+.meta-ok    { color:#4ADE80; }
+.meta-err   { color:#F87171; }
+.meta-cap   { color:#F59E0B; }
 
 .suggestion-hint { font-size:12px; color:#8B8FA8; margin:8px 0 4px 0; }
 
@@ -64,25 +86,22 @@ div[data-testid="stChatMessage"] { padding: 8px 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session state defaults ─────────────────────────────────────────────────────
+# ── Session state defaults ────────────────────────────────────────────────────
 
-if "thread_id" not in st.session_state:
-    st.session_state.thread_id = None
-if "messages" not in st.session_state:
-    st.session_state.messages = []   # list of dicts from db.get_messages()
-if "pending_question" not in st.session_state:
-    st.session_state.pending_question = None
-if "last_suggestions" not in st.session_state:
-    st.session_state.last_suggestions = []
+if "thread_id"        not in st.session_state: st.session_state.thread_id        = None
+if "messages"         not in st.session_state: st.session_state.messages          = []
+if "pending_question" not in st.session_state: st.session_state.pending_question  = None
+if "last_suggestions" not in st.session_state: st.session_state.last_suggestions  = []
+if "confirm_delete"   not in st.session_state: st.session_state.confirm_delete    = None
+if "show_all_threads" not in st.session_state: st.session_state.show_all_threads  = False
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-CHART_TYPES = ["Auto", "Bar", "Line", "Area", "Pie", "Scatter"]
 
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="#0F1117", plot_bgcolor="#0F1117", font_color="#FAFAFA",
     margin=dict(l=20, r=20, t=36, b=20),
-    xaxis=dict(gridcolor="#2A2D3E"), yaxis=dict(gridcolor="#2A2D3E"),
+    xaxis=dict(gridcolor="#2A2D3E", title_text=""),
+    yaxis=dict(gridcolor="#2A2D3E", title_text=""),
 )
 
 
@@ -94,7 +113,6 @@ def _df_from_json(result_json: str) -> pd.DataFrame:
 
 
 def _auto_chart(df: pd.DataFrame, override: str = "Auto"):
-    """Return a Plotly figure or None if no sensible chart exists."""
     if df.empty or len(df.columns) < 2:
         return None
     cols         = list(df.columns)
@@ -107,10 +125,7 @@ def _auto_chart(df: pd.DataFrame, override: str = "Auto"):
 
     x_num = numeric_cols[0]
     x_lbl = label_cols[0] if label_cols else cols[0]
-
-    chart = override if override != "Auto" else (
-        "Line" if date_cols else "Bar"
-    )
+    chart = override if override != "Auto" else ("Line" if date_cols else "Bar")
 
     try:
         if chart == "Bar":
@@ -125,8 +140,7 @@ def _auto_chart(df: pd.DataFrame, override: str = "Auto"):
             fig.update_layout(**PLOTLY_LAYOUT)
         elif chart == "Area":
             x_axis = date_cols[0] if date_cols else cols[0]
-            fig = px.area(df, x=x_axis, y=x_num,
-                          color_discrete_sequence=["#4F8EF7"])
+            fig = px.area(df, x=x_axis, y=x_num, color_discrete_sequence=["#4F8EF7"])
             fig.update_layout(**PLOTLY_LAYOUT)
         elif chart == "Pie":
             fig = px.pie(df, names=x_lbl, values=x_num,
@@ -134,8 +148,7 @@ def _auto_chart(df: pd.DataFrame, override: str = "Auto"):
             fig.update_layout(**PLOTLY_LAYOUT)
         elif chart == "Scatter":
             y_col = numeric_cols[1] if len(numeric_cols) > 1 else x_num
-            fig = px.scatter(df, x=x_num, y=y_col,
-                             color_discrete_sequence=["#4F8EF7"])
+            fig = px.scatter(df, x=x_num, y=y_col, color_discrete_sequence=["#4F8EF7"])
             fig.update_layout(**PLOTLY_LAYOUT)
         else:
             return None
@@ -145,26 +158,26 @@ def _auto_chart(df: pd.DataFrame, override: str = "Auto"):
 
 
 def _render_answer_card(msg: dict, card_key: str):
-    """Render a single assistant message as tabbed answer card."""
-    df         = _df_from_json(msg.get("result_json") or "[]")
-    sql        = msg.get("sql") or ""
-    expl       = msg.get("explanation") or ""
-    elapsed    = msg.get("elapsed_ms") or 0
-    error      = msg.get("error") or ""
-    row_count  = len(df)
+    df        = _df_from_json(msg.get("result_json") or "[]")
+    sql       = msg.get("sql") or ""
+    expl      = msg.get("explanation") or ""
+    elapsed   = msg.get("elapsed_ms") or 0
+    error     = msg.get("error") or ""
+    row_count = len(df)
+    was_capped = row_count >= MAX_DISPLAY_ROWS
 
     if error and not msg.get("result_json"):
-        st.error(f"Query failed: {error}")
+        st.error(_friendly_error(error))
         return
 
     # Metadata strip
     status_icon = "✓" if not error else "⚠"
     status_cls  = "meta-ok" if not error else "meta-err"
+    cap_note    = f' · <span class="meta-cap">first {MAX_DISPLAY_ROWS} rows shown</span>' if was_capped else ""
     st.markdown(
         f'<div class="meta-strip">'
         f'<span class="{status_cls}">{status_icon} {row_count} rows</span>'
-        f' · {elapsed:,}ms'
-        f'</div>',
+        f' · {elapsed:,}ms{cap_note}</div>',
         unsafe_allow_html=True,
     )
 
@@ -184,7 +197,6 @@ def _render_answer_card(msg: dict, card_key: str):
         else:
             st.dataframe(df, use_container_width=True, hide_index=True,
                          height=min(400, 38 + row_count * 35))
-
             col_csv, col_xl, _ = st.columns([1, 1, 6])
             with col_csv:
                 st.download_button(
@@ -193,19 +205,21 @@ def _render_answer_card(msg: dict, card_key: str):
                     key=f"csv_{card_key}",
                 )
             with col_xl:
-                buf = io.BytesIO()
-                df.to_excel(buf, index=False, engine="openpyxl")
-                st.download_button(
-                    "⬇ Excel", buf.getvalue(),
-                    file_name="analystiq_result.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"xl_{card_key}",
-                )
+                try:
+                    buf = io.BytesIO()
+                    df.to_excel(buf, index=False, engine="openpyxl")
+                    st.download_button(
+                        "⬇ Excel", buf.getvalue(),
+                        file_name="analystiq_result.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"xl_{card_key}",
+                    )
+                except Exception:
+                    st.caption("Excel export unavailable")
 
     # ── SQL tab ───────────────────────────────────────────────────────────────
     with tab_sql:
         st.code(sql, language="sql")
-
         if st.toggle("Edit & re-run", key=f"toggle_{card_key}"):
             edited = st.text_area("Edit SQL below:", value=sql,
                                   height=120, key=f"edit_{card_key}")
@@ -214,21 +228,20 @@ def _render_answer_card(msg: dict, card_key: str):
                     try:
                         resp = api_client.execute_sql(edited)
                         if resp.get("error"):
-                            st.error(resp["error"])
+                            st.error(_friendly_error(resp["error"]))
                         else:
                             df2 = _df_from_json(resp.get("result", "[]"))
                             st.success(f"{resp['row_count']} rows · {resp['elapsed_ms']}ms")
                             st.dataframe(df2, use_container_width=True, hide_index=True)
                     except api_client.APIError as e:
-                        st.error(e.detail)
+                        st.error(_friendly_error(e.detail))
 
     # ── Chart tab ─────────────────────────────────────────────────────────────
     with tab_chart:
         if df.empty or len(df.columns) < 2:
             st.info("No chart available for single-value or empty results.")
         else:
-            override = st.selectbox("Chart type", CHART_TYPES,
-                                    key=f"chart_type_{card_key}")
+            override = st.selectbox("Chart type", CHART_TYPES, key=f"chart_type_{card_key}")
             fig = _auto_chart(df, override)
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
@@ -237,10 +250,7 @@ def _render_answer_card(msg: dict, card_key: str):
 
     # ── Explanation tab ───────────────────────────────────────────────────────
     with tab_expl:
-        if expl:
-            st.markdown(expl)
-        else:
-            st.info("No explanation available.")
+        st.markdown(expl) if expl else st.info("No explanation available.")
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -249,39 +259,80 @@ with st.sidebar:
     st.markdown('<p class="brand">AnalystIQ</p>', unsafe_allow_html=True)
     st.markdown('<p class="brand-sub">AI Copilot for Data Analysts</p>', unsafe_allow_html=True)
 
-    # New chat button
     if st.button("＋ New chat", use_container_width=True, type="primary"):
+        # Clean up empty threads before creating a new one
+        db.delete_empty_threads()
         tid = db.create_thread()
-        st.session_state.thread_id = tid
-        st.session_state.messages  = []
+        st.session_state.thread_id       = tid
+        st.session_state.messages        = []
+        st.session_state.last_suggestions = []
+        st.session_state.confirm_delete  = None
         st.rerun()
 
     st.divider()
 
-    # Chat history
-    threads = db.list_threads()
+    # ── Chat history with pagination + delete confirmation ────────────────────
+    threads     = db.list_threads(limit=10)
+    total_count = db.count_threads()
+
     if threads:
         st.markdown("**Recent chats**")
         for t in threads:
             is_active = t["id"] == st.session_state.thread_id
-            label = ("▶ " if is_active else "") + t["title"]
-            col_btn, col_del = st.columns([5, 1])
-            with col_btn:
-                if st.button(label, key=f"thread_{t['id']}", use_container_width=True):
-                    st.session_state.thread_id = t["id"]
-                    st.session_state.messages  = db.get_messages(t["id"])
-                    st.rerun()
-            with col_del:
-                if st.button("✕", key=f"del_{t['id']}"):
-                    db.delete_thread(t["id"])
-                    if st.session_state.thread_id == t["id"]:
-                        st.session_state.thread_id = None
-                        st.session_state.messages  = []
-                    st.rerun()
+
+            # Delete confirmation flow
+            if st.session_state.confirm_delete == t["id"]:
+                st.warning(f'Delete "{t["title"][:30]}…"?')
+                c_yes, c_no = st.columns(2)
+                with c_yes:
+                    if st.button("Yes, delete", key=f"yes_{t['id']}", use_container_width=True):
+                        db.delete_thread(t["id"])
+                        if st.session_state.thread_id == t["id"]:
+                            st.session_state.thread_id       = None
+                            st.session_state.messages        = []
+                            st.session_state.last_suggestions = []
+                        st.session_state.confirm_delete = None
+                        st.rerun()
+                with c_no:
+                    if st.button("Cancel", key=f"no_{t['id']}", use_container_width=True):
+                        st.session_state.confirm_delete = None
+                        st.rerun()
+            else:
+                label = ("▶ " if is_active else "") + t["title"]
+                col_btn, col_del = st.columns([5, 1])
+                with col_btn:
+                    if st.button(label, key=f"thread_{t['id']}", use_container_width=True):
+                        st.session_state.thread_id       = t["id"]
+                        st.session_state.messages        = db.get_messages(t["id"])
+                        st.session_state.last_suggestions = []
+                        st.rerun()
+                with col_del:
+                    if st.button("✕", key=f"del_{t['id']}"):
+                        st.session_state.confirm_delete = t["id"]
+                        st.rerun()
+
+        # Show more / show less pagination
+        if total_count > 10:
+            remaining = total_count - 10
+            if st.button(f"Show {remaining} more…", use_container_width=True):
+                all_threads = db.list_threads(limit=total_count)
+                for t in all_threads[10:]:
+                    is_active = t["id"] == st.session_state.thread_id
+                    label = ("▶ " if is_active else "") + t["title"]
+                    col_btn, col_del = st.columns([5, 1])
+                    with col_btn:
+                        if st.button(label, key=f"thread_x_{t['id']}", use_container_width=True):
+                            st.session_state.thread_id = t["id"]
+                            st.session_state.messages  = db.get_messages(t["id"])
+                            st.rerun()
+                    with col_del:
+                        if st.button("✕", key=f"del_x_{t['id']}"):
+                            st.session_state.confirm_delete = t["id"]
+                            st.rerun()
 
     st.divider()
 
-    # Schema browser
+    # ── Schema browser ────────────────────────────────────────────────────────
     with st.expander("🗂 Schema browser", expanded=False):
         try:
             schema_data = api_client.get_schema()
@@ -290,10 +341,8 @@ with st.sidebar:
                 for col in tbl["columns"]:
                     pk_badge = ' <span class="schema-pk">PK</span>' if col.get("is_pk") else ""
                     st.markdown(
-                        f'<div style="padding-left:12px">'
-                        f'{col["name"]}'
-                        f'<span class="schema-type"> {col["type"]}</span>'
-                        f'{pk_badge}</div>',
+                        f'<div style="padding-left:12px">{col["name"]}'
+                        f'<span class="schema-type"> {col["type"]}</span>{pk_badge}</div>',
                         unsafe_allow_html=True,
                     )
         except api_client.APIError as e:
@@ -307,10 +356,11 @@ with st.sidebar:
     Built by <b>Haripranay Peddagolla</b>
     </div>""", unsafe_allow_html=True)
 
-# ── Main area — ensure we have an active thread ───────────────────────────────
+
+# ── Main area ─────────────────────────────────────────────────────────────────
 
 if st.session_state.thread_id is None:
-    # ── Empty state ───────────────────────────────────────────────────────────
+    # ── Empty / welcome state ─────────────────────────────────────────────────
     st.markdown("<br><br>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
@@ -327,13 +377,16 @@ if st.session_state.thread_id is None:
         ]
         for ex in examples:
             if st.button(ex, use_container_width=True, key=f"ex_{ex}"):
+                db.delete_empty_threads()
                 tid = db.create_thread(title=ex[:60])
-                st.session_state.thread_id = tid
-                st.session_state.messages  = []
+                st.session_state.thread_id       = tid
+                st.session_state.messages        = []
                 st.session_state.pending_question = ex
+                st.session_state.last_suggestions = []
                 st.rerun()
+
 else:
-    # ── Active thread — render chat history ───────────────────────────────────
+    # ── Active thread ─────────────────────────────────────────────────────────
     if not st.session_state.messages:
         st.session_state.messages = db.get_messages(st.session_state.thread_id)
 
@@ -343,18 +396,21 @@ else:
                 st.write(msg["question"])
         else:
             with st.chat_message("assistant"):
-                card_key = str(msg["id"])
-                _render_answer_card(msg, card_key)
+                _render_answer_card(msg, str(msg["id"]))
 
-    # ── Process pending question (from example buttons or suggestions) ────────
+    # ── Process pending question ──────────────────────────────────────────────
     if st.session_state.pending_question:
         question = st.session_state.pending_question
-        st.session_state.pending_question = None
+        st.session_state.pending_question  = None
+        st.session_state.last_suggestions  = []
 
         db.save_user_message(st.session_state.thread_id, question)
 
         with st.chat_message("user"):
             st.write(question)
+
+        resp         = None
+        agent_error  = None
 
         with st.chat_message("assistant"):
             with st.status("Thinking…", expanded=True) as status:
@@ -364,70 +420,66 @@ else:
                     status.write("Running query…")
                     status.write("Building chart…")
                     status.update(label="Done", state="complete", expanded=False)
-
-                    mid = db.save_assistant_message(
-                        thread_id=st.session_state.thread_id,
-                        question=question,
-                        sql=resp.get("sql", ""),
-                        result_json=resp.get("result", "[]"),
-                        explanation=resp.get("explanation", ""),
-                        elapsed_ms=resp.get("elapsed_ms", 0),
-                        error=resp.get("error", ""),
-                    )
-                    msg_record = {
-                        "id": mid, "role": "assistant",
-                        "question": question,
-                        "sql": resp.get("sql", ""),
-                        "result_json": resp.get("result", "[]"),
-                        "explanation": resp.get("explanation", ""),
-                        "elapsed_ms": resp.get("elapsed_ms", 0),
-                        "error": resp.get("error", ""),
-                    }
-                    st.session_state.messages.append(
-                        {"role": "user", "question": question, "id": None}
-                    )
-                    st.session_state.messages.append(msg_record)
-                    _render_answer_card(msg_record, str(mid))
-
-                    # Auto-rename thread on first message
-                    if len(st.session_state.messages) <= 2:
-                        db.rename_thread(st.session_state.thread_id, question[:60])
-
-                    # Fetch follow-up suggestions and store for the strip above input
-                    result_preview = resp.get("result", "[]")[:500]
-                    suggestions = api_client.get_suggestions(
-                        question, resp.get("sql", ""), result_preview
-                    )
-                    st.session_state.last_suggestions = suggestions
-
                 except api_client.APIError as e:
+                    agent_error = _friendly_error(e.detail)
                     status.update(label="Error", state="error", expanded=False)
-                    st.error(f"**{e.status_code}** — {e.detail}")
+                    st.error(agent_error)
+
+        # Save + render outside the status block so suggestions don't taint it
+        if resp is not None:
+            mid = db.save_assistant_message(
+                thread_id=st.session_state.thread_id,
+                question=question,
+                sql=resp.get("sql", ""),
+                result_json=resp.get("result", "[]"),
+                explanation=resp.get("explanation", ""),
+                elapsed_ms=resp.get("elapsed_ms", 0),
+                error=resp.get("error", ""),
+            )
+            msg_record = {
+                "id": mid, "role": "assistant", "question": question,
+                "sql": resp.get("sql", ""),
+                "result_json": resp.get("result", "[]"),
+                "explanation": resp.get("explanation", ""),
+                "elapsed_ms": resp.get("elapsed_ms", 0),
+                "error": resp.get("error", ""),
+            }
+            st.session_state.messages.append({"role": "user",      "question": question, "id": None})
+            st.session_state.messages.append(msg_record)
+
+            with st.chat_message("assistant"):
+                _render_answer_card(msg_record, str(mid))
+
+            # Auto-rename thread on first real answer
+            if sum(1 for m in st.session_state.messages if m["role"] == "assistant") == 1:
+                db.rename_thread(st.session_state.thread_id, question[:60])
+
+            # Fetch suggestions completely outside the status block
+            result_preview = resp.get("result", "[]")[:500]
+            st.session_state.last_suggestions = api_client.get_suggestions(
+                question, resp.get("sql", ""), result_preview
+            )
 
         st.rerun()
 
-# ── Suggestion strip above chat input ────────────────────────────────────────
-# Shows contextual follow-ups after last answer, or starter questions on a
-# fresh thread — fills the empty space and guides the analyst forward.
+# ── Suggestion strip above chat input ─────────────────────────────────────────
 
 if st.session_state.thread_id is not None:
-    msgs = st.session_state.messages
+    msgs        = st.session_state.messages
     has_answers = any(m["role"] == "assistant" for m in msgs)
 
-    if has_answers and "last_suggestions" in st.session_state and st.session_state.last_suggestions:
-        # Show LLM-generated follow-ups from the last answer
+    if has_answers and st.session_state.last_suggestions:
         st.markdown('<div class="suggestion-hint">💡 Suggested follow-ups</div>',
                     unsafe_allow_html=True)
         sug_cols = st.columns(len(st.session_state.last_suggestions))
         for i, (col, sug) in enumerate(zip(sug_cols, st.session_state.last_suggestions)):
             with col:
                 if st.button(sug, use_container_width=True, key=f"strip_sug_{i}"):
-                    st.session_state.pending_question = sug
-                    st.session_state.last_suggestions = []
+                    st.session_state.pending_question  = sug
+                    st.session_state.last_suggestions  = []
                     st.rerun()
 
     elif not has_answers:
-        # Fresh thread — show starter questions
         starters = [
             "How many customers do we have by segment?",
             "What are the top 5 merchants by fraud amount?",
@@ -443,7 +495,7 @@ if st.session_state.thread_id is not None:
                     st.session_state.pending_question = q
                     st.rerun()
 
-# ── Chat input (pinned bottom) ────────────────────────────────────────────────
+# ── Chat input ────────────────────────────────────────────────────────────────
 
 if st.session_state.thread_id is not None:
     if prompt := st.chat_input("Ask a question about your data…"):
