@@ -18,7 +18,7 @@ import streamlit as st
 # ── Page config MUST be the first Streamlit call — before st.secrets ──────────
 st.set_page_config(
     page_title="AnalystIQ",
-    page_icon="🔍",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -72,6 +72,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []   # list of dicts from db.get_messages()
 if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
+if "last_suggestions" not in st.session_state:
+    st.session_state.last_suggestions = []
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -244,7 +246,7 @@ def _render_answer_card(msg: dict, card_key: str):
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown('<p class="brand">🔍 AnalystIQ</p>', unsafe_allow_html=True)
+    st.markdown('<p class="brand">AnalystIQ</p>', unsafe_allow_html=True)
     st.markdown('<p class="brand-sub">AI Copilot for Data Analysts</p>', unsafe_allow_html=True)
 
     # New chat button
@@ -391,24 +393,55 @@ else:
                     if len(st.session_state.messages) <= 2:
                         db.rename_thread(st.session_state.thread_id, question[:60])
 
-                    # Follow-up suggestions
+                    # Fetch follow-up suggestions and store for the strip above input
                     result_preview = resp.get("result", "[]")[:500]
                     suggestions = api_client.get_suggestions(
                         question, resp.get("sql", ""), result_preview
                     )
-                    if suggestions:
-                        st.markdown('<div class="suggestion-hint">Suggested follow-ups:</div>',
-                                    unsafe_allow_html=True)
-                        for i, sug in enumerate(suggestions):
-                            if st.button(sug, key=f"sug_{mid}_{i}"):
-                                st.session_state.pending_question = sug
-                                st.rerun()
+                    st.session_state.last_suggestions = suggestions
 
                 except api_client.APIError as e:
                     status.update(label="Error", state="error", expanded=False)
                     st.error(f"**{e.status_code}** — {e.detail}")
 
         st.rerun()
+
+# ── Suggestion strip above chat input ────────────────────────────────────────
+# Shows contextual follow-ups after last answer, or starter questions on a
+# fresh thread — fills the empty space and guides the analyst forward.
+
+if st.session_state.thread_id is not None:
+    msgs = st.session_state.messages
+    has_answers = any(m["role"] == "assistant" for m in msgs)
+
+    if has_answers and "last_suggestions" in st.session_state and st.session_state.last_suggestions:
+        # Show LLM-generated follow-ups from the last answer
+        st.markdown('<div class="suggestion-hint">💡 Suggested follow-ups</div>',
+                    unsafe_allow_html=True)
+        sug_cols = st.columns(len(st.session_state.last_suggestions))
+        for i, (col, sug) in enumerate(zip(sug_cols, st.session_state.last_suggestions)):
+            with col:
+                if st.button(sug, use_container_width=True, key=f"strip_sug_{i}"):
+                    st.session_state.pending_question = sug
+                    st.session_state.last_suggestions = []
+                    st.rerun()
+
+    elif not has_answers:
+        # Fresh thread — show starter questions
+        starters = [
+            "How many customers do we have by segment?",
+            "What are the top 5 merchants by fraud amount?",
+            "Show total transactions per month in the last year",
+            "What is the average credit score by segment?",
+        ]
+        st.markdown('<div class="suggestion-hint">💡 Try asking</div>',
+                    unsafe_allow_html=True)
+        s_cols = st.columns(2)
+        for i, q in enumerate(starters):
+            with s_cols[i % 2]:
+                if st.button(q, use_container_width=True, key=f"starter_{i}"):
+                    st.session_state.pending_question = q
+                    st.rerun()
 
 # ── Chat input (pinned bottom) ────────────────────────────────────────────────
 
