@@ -16,7 +16,8 @@ Not an AI engineer. An analyst who ships AI-powered data tools.
 **PHASE 3 COMPLETE — FastAPI Backend**
 **PHASE 4 COMPLETE — Streamlit UI**
 **PHASE 5 COMPLETE — Production UI + Hardening**
-**PHASE 6 NEXT — README + Deployment**
+**PHASE 6 COMPLETE — README + Deployment**
+**PROJECT COMPLETE**
 
 ## Stack & Why
 | Layer       | Tool              | Why                                              |
@@ -88,6 +89,9 @@ Tables we work with (mirrors real analyst work at State Street):
 - [Phase 5] chat_threads/chat_messages filtered from schema browser (internal tables)
 - [Phase 5] delete_empty_threads() called on every New Chat click to prevent sidebar bloat
 - [Phase 5] Numeric dtype coercion in _auto_chart — JSON columns come back as object dtype
+- [Phase 6] Procfile + railway.json for Railway backend deployment (auto-detected by NIXPACKS)
+- [Phase 6] API_URL and DATABASE_URL_RO added to .env.example and secrets.toml.example
+- [Phase 6] Deployment targets: Neon (DB) + Railway (API) + Streamlit Community Cloud (UI)
 
 ## What NOT to do
 - Do NOT hardcode API keys anywhere

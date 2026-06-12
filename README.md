@@ -199,6 +199,71 @@ Interactive docs at **http://localhost:8000/docs** when the API is running.
 
 ---
 
+## Deployment
+
+The full stack deploys to three free-tier services: **Neon** (database), **Railway** (backend), and **Streamlit Community Cloud** (frontend).
+
+```
+Neon PostgreSQL (free tier)
+         │
+         ▼
+Railway FastAPI backend  ──── API_URL ────▶  Streamlit Community Cloud
+```
+
+### Step 1 — Database (Neon)
+
+1. Create a free account at [neon.tech](https://neon.tech) → New project
+2. Copy the connection string (looks like `postgresql://user:pass@ep-xxx.neon.tech/analystiq?sslmode=require`)
+3. Run the schema and seed data:
+
+```bash
+psql "your-neon-connection-string" -f db/schema.sql
+DATABASE_URL="your-neon-connection-string" python db/seed.py
+```
+
+4. (Recommended) Create a read-only role for the `/execute` endpoint:
+
+```sql
+CREATE ROLE analystiq_ro LOGIN PASSWORD 'choose-a-password';
+GRANT CONNECT ON DATABASE analystiq TO analystiq_ro;
+GRANT USAGE ON SCHEMA public TO analystiq_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO analystiq_ro;
+```
+
+### Step 2 — Backend (Railway)
+
+1. Push this repo to GitHub (if not already done)
+2. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo** → select this repo
+3. Railway auto-detects the `Procfile` and starts the API
+4. Under **Variables**, add:
+
+| Variable | Value |
+|---|---|
+| `OPENAI_API_KEY` | Your OpenAI API key |
+| `OPENAI_MODEL` | `gpt-4o-mini` |
+| `DATABASE_URL` | Neon connection string |
+| `DATABASE_URL_RO` | Neon read-only connection string (optional) |
+
+5. Copy the public Railway URL (e.g. `https://analystiq-production.up.railway.app`)
+
+### Step 3 — Frontend (Streamlit Community Cloud)
+
+1. Go to [share.streamlit.io](https://share.streamlit.io) → **New app**
+2. Select this GitHub repo, branch `main`, main file `ui/app.py`
+3. Under **Advanced settings → Secrets**, paste (substituting your real values):
+
+```toml
+OPENAI_API_KEY  = "sk-your-key"
+OPENAI_MODEL    = "gpt-4o-mini"
+DATABASE_URL    = "postgresql://...@neon.tech/analystiq?sslmode=require"
+DATABASE_URL_RO = "postgresql://analystiq_ro:...@neon.tech/analystiq?sslmode=require"
+API_URL         = "https://your-app.up.railway.app"
+```
+
+4. Click **Deploy** — the app is live at `https://your-app.streamlit.app`
+
+---
+
 ## Interview Talking Points
 
 **"Why LangGraph instead of a simple chain?"**
